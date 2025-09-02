@@ -18,7 +18,7 @@
 <body>
   <div class="wrap">
     <h1 style="margin:0 0 8px">사진 보기 & 저장</h1>
-    <p class="hint">아래 사진을 확인한 뒤, [이미지 저장] 버튼을 눌러 다운로드하세요. iOS/Safari는 [새 탭에서 열기] 후 길게 눌러 저장하면 더 잘 됩니다.</p>
+    <p class="hint">아래 사진을 확인한 뒤, [이미지 저장] 버튼을 누르세요. iOS/Safari는 [새 탭에서 열기] 후 길게 눌러 저장이 안정적입니다.</p>
 
     <div class="img-box">
       <img id="viewImg" alt="결과 이미지" />
@@ -33,26 +33,9 @@
     <p class="hint" id="msg"></p>
   </div>
 
-  <!-- 압축 해제용 -->
   <script>
-    function getImageDataUrlFromLocation(){
-      // 1) 해시 방식(#d=...) 우선
-      if (location.hash.startsWith('#d=')) {
-        const packed = location.hash.slice(3);
-        try {
-          const raw = LZString.decompressFromEncodedURIComponent(packed);
-          const obj = JSON.parse(raw);
-          if (obj && obj.img && typeof obj.img === 'string') return obj.img;
-        } catch {}
-      }
-      // 2) 쿼리 방식(?img=...)도 지원(호환)
-      const p = new URLSearchParams(location.search);
-      const q = p.get('img');
-      if (q) return decodeURIComponent(q);
-      return null;
-    }
-
-    const imgUrl = getImageDataUrlFromLocation();
+    const p = new URLSearchParams(location.search);
+    const imgUrl = p.get('img');
     const imgEl = document.getElementById('viewImg');
     const btnDownload = document.getElementById('btnDownload');
     const btnOpen = document.getElementById('btnOpen');
@@ -60,20 +43,19 @@
     const msg = document.getElementById('msg');
 
     if (!imgUrl) {
-      msg.textContent = '이미지 데이터를 찾지 못했습니다. QR을 통해 접근했는지 확인해주세요.';
+      msg.textContent = '이미지 URL을 찾지 못했습니다. QR을 통해 접근했는지 확인해주세요.';
       btnDownload.disabled = true;
       btnCopy.disabled = true;
     } else {
-      imgEl.src = imgUrl;         // data:image/jpeg;base64,...
-      btnOpen.href = imgUrl;      // 새 탭 열기용 (iOS 저장 대안)
+      imgEl.src = imgUrl;
+      btnOpen.href = imgUrl;
     }
 
-    // "버튼을 눌러야" 저장 시작 (자동 저장 없음)
     btnDownload.addEventListener('click', () => {
       if (!imgUrl) return;
       try {
         const a = document.createElement('a');
-        a.href = imgUrl;                    // dataURL 직접 저장
+        a.href = imgUrl;
         a.download = 'fourcut.jpg';
         document.body.appendChild(a);
         a.click();
