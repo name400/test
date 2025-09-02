@@ -5,8 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>보성제 | 4컷</title>
   <link rel="stylesheet" href="style.css" />
-
-  <!-- ✅ QR 팝업 인라인 스타일(빠른 로드용) -->
+  <!-- QR 팝업 인라인 -->
   <style>
     #qrPopup{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10000;display:flex;justify-content:center;align-items:center}
     #qrPopup .popup-content{position:relative;background:#fff;padding:24px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.3);width:min(90vw,420px);text-align:center;display:flex;flex-direction:column;align-items:center}
@@ -20,11 +19,10 @@
   <!-- 상단바 -->
   <div class="topbar">
     <div class="brand">
-      <img src="posung.png" class="logo" alt="logo" />
+      <img src="posung.png" class="logo top-logo" alt="logo" crossorigin="anonymous" />
       <span>2025 보성제</span>
     </div>
 
-    <!-- 단계 표시 -->
     <div class="steps" id="steps">
       <span class="step" data-step="camera">1. 촬영</span>
       <span class="sep">></span>
@@ -39,11 +37,7 @@
     </div>
   </div>
 
-  <!-- =========================
-       PAGES (한 번에 하나만 표시)
-       ========================= -->
   <main class="pages">
-
     <!-- 📸 1단계: 촬영 -->
     <section id="pageCamera" class="page active" aria-label="촬영 단계">
       <div class="panel">
@@ -77,7 +71,7 @@
       <div class="panel">
         <div class="card thumbs">
           <div id="thumbGrid" class="thumb-grid"></div>
-          <div class="hint">자동/수동으로 촬영된 6장 중 <b>4장</b>을 선택하세요.</div>
+          <div class="hint">자동/수동 촬영 6장 중 <b>4장</b>을 선택하세요.</div>
         </div>
 
         <div class="actions between">
@@ -93,14 +87,14 @@
         <div class="card preview">
           <div id="fourcut" class="fourcut polaroid">
             <div class="fc-header">
-              <img src="posung.png" class="fc-logo" alt="logo" />
+              <!-- 캡처 대상 → dataURL 인라인 처리 예정 -->
+              <img src="posung.png" class="fc-logo" alt="logo" crossorigin="anonymous" />
               <div class="fc-title">2025 보성제</div>
             </div>
             <div id="finalGrid" class="grid"></div>
           </div>
         </div>
 
-        <!-- 프레임/글씨 색상 -->
         <label class="cap-label">프레임 스타일</label>
         <select id="frameStyle" class="input small">
           <option value="polaroid">폴라로이드</option>
@@ -116,9 +110,7 @@
         <input id="fontColor" class="input small" type="color" value="#000000" />
 
         <div class="actions between">
-          <div>
-            <button class="ghost" id="backToSelect">← 이전(선택)</button>
-          </div>
+          <button class="ghost" id="backToSelect">← 이전(선택)</button>
           <div class="right">
             <button id="btnMake" class="accent" disabled>4컷 만들기</button>
             <button id="btnSave" class="primary" disabled>저장(QR)</button>
@@ -145,12 +137,14 @@
   <div id="flash" class="flash"></div>
   <div id="countdown" class="big-countdown"></div>
 
-  <!-- ✅ QR 팝업 -->
+  <!-- QR 팝업 -->
   <div id="qrPopup">
     <div class="popup-content">
       <span class="close-btn" onclick="closeQrPopup()">×</span>
       <div class="popup-title">📲 저장 완료! QR을 스캔하세요</div>
       <div id="qrPopupContainer"></div>
+      <div id="qrLoading" style="margin-top:8px;color:#666;display:none">업로드 중...</div>
+      <div id="qrError" style="margin-top:8px;color:#e00;display:none"></div>
     </div>
   </div>
 
