@@ -11,23 +11,10 @@ let remain = 6, currentFacing = "user", currentDeviceId = null;
 
 // ---------- 페이지 전환 ----------
 const PAGES = { camera: "#pageCamera", select: "#pageSelect", edit: "#pageEdit" };
-let currentPage = "camera";
-
 function showPage(name) {
-  currentPage = name;
   Object.values(PAGES).forEach(sel => $(sel).classList.remove("active"));
   $(PAGES[name]).classList.add("active");
-
-  // 단계 active 표시
   $$(".step").forEach(s => s.classList.toggle("active", s.dataset.step === name));
-}
-function enableNextFromCamera() {
-  // 6장 이상 촬영되면 다음으로
-  $("#toSelect").disabled = shots.length < 6;
-}
-function enableNextFromSelect() {
-  $("#toEdit").disabled = !(selected.size === 4);
-  $("#btnMake").disabled = !(selected.size === 4);
 }
 
 // ---------- 카메라 ----------
@@ -46,6 +33,10 @@ async function listCameras() {
 }
 async function startCamera() {
   try {
+    if (!location.protocol.startsWith("https")) {
+      alert("카메라는 HTTPS에서만 동작합니다. GitHub Pages 주소(https://...)로 접속하세요.");
+      return;
+    }
     if (stream) stopCamera();
     const constraints = currentDeviceId
       ? { video: { deviceId: { exact: currentDeviceId } }, audio: false }
@@ -75,15 +66,13 @@ function updateCountdownUI(t) {
 }
 
 async function startAutoCapture() {
-  // 촬영 세션 초기화
   shots = [];
   selected.clear();
   finalDataUrl = null;
   renderThumbs();
   renderPreview();
   updateCounter();
-  enableNextFromCamera();
-  enableNextFromSelect();
+  toggleNextButtons();
 
   autoRunning = true;
   remain = 6;
@@ -106,8 +95,7 @@ async function startAutoCapture() {
         autoRunning = false;
         clearInterval(autoTimer);
         updateCountdownUI("");
-        enableNextFromCamera();
-        // 자동 촬영 완료 시 자동으로 선택 단계로 이동
+        toggleNextButtons();
         showPage("select");
       }
     }
@@ -125,14 +113,14 @@ function doCapture() {
     shots.push(dataUrl);
     renderThumbs();
     updateCounter();
-    enableNextFromCamera();
+    toggleNextButtons();
   }
 }
 function updateCounter() {
   $("#shotCounter").textContent = `${shots.length} / 6`;
 }
 
-// ---------- 섬네일/미리보기 ----------
+// ---------- 선택 & 미리보기 ----------
 function renderThumbs() {
   const grid = $("#thumbGrid");
   grid.innerHTML = "";
@@ -145,7 +133,7 @@ function renderThumbs() {
       else if (selected.size < 4) selected.add(idx);
       renderThumbs();
       renderPreview();
-      enableNextFromSelect();
+      toggleNextButtons();
     };
     grid.appendChild(d);
   });
@@ -161,13 +149,55 @@ function renderPreview() {
     grid.appendChild(cell);
   });
 }
+function toggleNextButtons() {
+  $("#toSelect").disabled = shots.length < 6;
+  const ok4 = (selected.size === 4);
+  $("#toEdit").disabled = !ok4;
+  const btnMake = $("#btnMake");
+  if (btnMake) btnMake.disabled = !ok4;
+}
+
+// ---------- 로고 안전화(dataURL 인라인) ----------
+async function inlineImageToDataURL(imgEl) {
+  if (!imgEl || imgEl.src.startsWith("data:")) return;
+  try {
+    const res = await fetch(imgEl.src, { mode: "cors" });
+    const blob = await res.blob();
+    const reader = new FileReader();
+    const dataURL = await new Promise(r => { reader.onload = () => r(reader.result); reader.readAsDataURL(blob); });
+    imgEl.src = dataURL;
+  } catch {
+    // 실패 시 캡처에서 제외(taint 회피)
+    imgEl.setAttribute("data-html2canvas-ignore", "true");
+  }
+}
+async function prepareLogosForCapture() {
+  await inlineImageToDataURL($(".fc-logo"));
+  // 상단 로고는 프레임 캡처에 포함되지 않지만, 필요하면 아래도 가능
+  // await inlineImageToDataURL($(".top-logo"));
+}
+
+// ---------- 환경 감지 ----------
+function isMobile(){
+  return /iphone|ipad|ipod|android|mobile/i.test(navigator.userAgent);
+}
 
 // ---------- 합성 ----------
 async function makeFourcut() {
   if (selected.size !== 4) return alert("4장을 선택하세요");
+
+  // 캔버스 taint 방지
+  await prepareLogosForCapture();
+
   const node = $("#fourcut");
-  const canvas = await html2canvas(node, { backgroundColor: null, scale: 2 });
-  finalDataUrl = canvas.toDataURL("image/jpeg", 0.92);
+  const canvas = await html2canvas(node, {
+    backgroundColor: null,
+    useCORS: true,
+    allowTaint: false,
+    scale: isMobile() ? 1.25 : 2   // 모바일 용량 최적화
+  });
+  const quality = isMobile() ? 0.82 : 0.92;
+  finalDataUrl = canvas.toDataURL("image/jpeg", quality);
   $("#btnSave").disabled = false;
 }
 
@@ -191,8 +221,7 @@ function resetSession() {
   updateCounter();
   $("#btnSave").disabled = true;
   $("#btnMake").disabled = true;
-  enableNextFromCamera();
-  enableNextFromSelect();
+  toggleNextButtons();
 }
 async function renderGallery() {
   const grid = $("#galleryGrid");
@@ -210,7 +239,7 @@ async function renderGallery() {
   for (const it of items) {
     const wrap = document.createElement("div");
     wrap.className = "g-item";
-    wrap.innerHTML = `<img src="${it.image}"><button class="del">×</button>`;
+    wrap.innerHTML = `<img src="${it.image}" alt=""><button class="del">×</button>`;
     wrap.querySelector(".del").onclick = () => {
       localStorage.removeItem("photo:" + it.id);
       renderGallery();
@@ -239,50 +268,90 @@ function updateFontColor(){
 
 // ---------- Cloudinary 업로드 + QR ----------
 const CLOUD_NAME = 'djqkuxfki', UPLOAD_PRESET = 'fourcut_unsigned';
+
+function setQrState({loading=false, error=""} = {}) {
+  const l = $("#qrLoading"), e = $("#qrError");
+  if (l) l.style.display = loading ? "block" : "none";
+  if (e) {
+    e.style.display = error ? "block" : "none";
+    e.textContent = error || "";
+  }
+}
+function computeQrPopupSize(){ return Math.max(160, Math.floor(Math.min(window.innerWidth * 0.6, 260))); }
+function openQrPopup(url){
+  const p=$("#qrPopup"), w=$("#qrPopupContainer");
+  w.innerHTML="";
+  new QRCode(w,{text:url,width:computeQrPopupSize(),height:computeQrPopupSize(),correctLevel:QRCode.CorrectLevel.M});
+  p.style.display='flex';
+}
+function closeQrPopup(){ resetSession(); $("#qrPopup").style.display='none'; showPage('camera'); }
+
 async function uploadFinalToCloudinary(){
   const blob = await (await fetch(finalDataUrl)).blob();
+  if (blob.size > 10 * 1024 * 1024) {
+    throw new Error(`이미지가 너무 큽니다 (${(blob.size/1024/1024).toFixed(1)}MB).`);
+  }
   const form = new FormData();
   form.append('file', blob);
   form.append('upload_preset', UPLOAD_PRESET);
-  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, { method:'POST', body: form });
+
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
+    method:'POST',
+    body: form,
+    mode: 'cors',
+    credentials: 'omit',
+    cache: 'no-store'
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(()=> "");
+    throw new Error(`업로드 실패(${res.status}). ${txt?.slice(0,120)}`);
+  }
   const data = await res.json();
+  if (!data.secure_url) throw new Error("업로드 응답에 secure_url이 없습니다.");
   return data.secure_url;
+}
+async function showQrPopupWithUpload(){
+  // 로딩 표시 + 팝업 먼저 열기(모바일에서 팝업 차단 이슈 회피)
+  setQrState({loading:true, error:""});
+  $("#qrPopup").style.display='flex';
+  $("#qrPopupContainer").innerHTML = "";
+
+  try{
+    const url = await uploadFinalToCloudinary();
+    setQrState({loading:false});
+    openQrPopup(makeViewerUrl(url));
+  }catch(err){
+    console.error(err);
+    setQrState({loading:false, error: "QR 생성 실패: " + err.message});
+    const w = $("#qrPopupContainer");
+    const retry = document.createElement("button");
+    retry.textContent = "다시 시도";
+    retry.className = "ghost";
+    retry.onclick = () => { setQrState({loading:true, error:""}); showQrPopupWithUpload(); };
+    w.innerHTML = "";
+    w.appendChild(retry);
+  }
 }
 function makeViewerUrl(u){
   const v = new URL('viewer.html', location.href);
   v.searchParams.set('img', u);
   return v.toString();
 }
-function computeQrPopupSize(){ return Math.max(160, Math.floor(Math.min(window.innerWidth * 0.6, 260))); }
-function openQrPopup(url){
-  const p = $("#qrPopup"), w = $("#qrPopupContainer");
-  w.innerHTML = "";
-  new QRCode(w, { text: url, width: computeQrPopupSize(), height: computeQrPopupSize(), correctLevel: QRCode.CorrectLevel.M });
-  p.style.display = 'flex';
-}
-function closeQrPopup(){ resetSession(); $("#qrPopup").style.display='none'; showPage('camera'); }
-async function showQrPopupWithUpload(){
-  const u = await uploadFinalToCloudinary();
-  openQrPopup(makeViewerUrl(u));
-}
 
 // ---------- 이벤트 ----------
 document.addEventListener("DOMContentLoaded", async () => {
   await listCameras();
 
-  // 상단바
-  $("#cameraSelect").onchange = () => { currentDeviceId = $("#cameraSelect").value; };
-
-  // 페이지 이동 버튼
+  // 페이지 이동
   $("#toSelect").onclick = () => showPage("select");
   $("#toEdit").onclick = () => { renderPreview(); showPage("edit"); };
   $("#backToCamera").onclick = () => showPage("camera");
   $("#backToSelect").onclick = () => showPage("select");
 
-  // 카메라 흐름
+  // 카메라
+  $("#cameraSelect").onchange = () => { currentDeviceId = $("#cameraSelect").value; };
   $("#btnStart").onclick = async () => { await startCamera(); startAutoCapture(); };
   $("#btnShot").onclick  = () => { triggerFlash(); doCapture(); if (autoRunning){ remain = 6; updateCountdownUI(remain); } };
-
   $("#btnReset").onclick = () => resetSession();
   $("#btnFlip").onclick  = async () => {
     currentFacing = (currentFacing === "user") ? "environment" : "user";
@@ -327,6 +396,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 초기 상태
   updateFrame();
   updateFontColor();
-  enableNextFromCamera();
-  enableNextFromSelect();
+  toggleNextButtons();
 });
