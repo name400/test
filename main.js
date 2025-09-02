@@ -96,7 +96,7 @@ async function startAutoCapture() {
         clearInterval(autoTimer);
         updateCountdownUI("");
         toggleNextButtons();
-        showPage("select"); // 자동 이동
+        showPage("select");
       }
     }
   }, 1000);
@@ -157,103 +157,99 @@ function toggleNextButtons() {
   if (btnMake) btnMake.disabled = !ok4;
 }
 
-// ---------- 고해상도 합성 유틸 ----------
-function parseResSel() {
-  const v = ($("#resSel")?.value || "2400x3600").split("x");
-  return { W: parseInt(v[0], 10), H: parseInt(v[1], 10) }; // 2:3 비율
-}
-function loadImage(src) {
-  return new Promise((res, rej) => {
-    const im = new Image();
-    im.onload = () => res(im);
-    im.onerror = rej;
-    im.src = src;
-  });
-}
-function drawFrameBackground(ctx, W, H, style, color) {
-  if (style === "polaroid" || style === "solid") {
-    ctx.fillStyle = color;
-    ctx.fillRect(0, 0, W, H);
-  } else if (style === "gradientLight") {
-    const g = ctx.createLinearGradient(0, 0, W, H);
-    g.addColorStop(0, color);
-    g.addColorStop(1, "#ffffff");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
-  } else { // gradientDark
-    const g = ctx.createLinearGradient(0, 0, W, H);
-    g.addColorStop(0, color);
-    g.addColorStop(1, "#000000");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
+// ---------- 로고 안전화(dataURL 인라인) ----------
+async function inlineImageToDataURL(imgEl) {
+  if (!imgEl || imgEl.src.startsWith("data:")) return;
+  try {
+    const res = await fetch(imgEl.src, { mode: "cors" });
+    const blob = await res.blob();
+    const reader = new FileReader();
+    const dataURL = await new Promise(r => { reader.onload = () => r(reader.result); reader.readAsDataURL(blob); });
+    imgEl.src = dataURL;
+  } catch {
+    // 실패 시 캡처에서 제외(taint 회피)
+    imgEl.setAttribute("data-html2canvas-ignore", "true");
   }
 }
-function layoutFourcutRect(W, H, style) {
-  const outerPad = Math.round(Math.min(W, H) * 0.05);
-  const bottomExtra = (style === "polaroid") ? Math.round(H * 0.06) : 0;
-  const gap = Math.round(Math.min(W, H) * 0.02);
-
-  const innerX = outerPad;
-  const innerY = outerPad;
-  const innerW = W - outerPad * 2;
-  const innerH = H - outerPad * 2 - bottomExtra;
-
-  const cellW = Math.round((innerW - gap) / 2);
-  const cellH = Math.round((innerH - gap) / 2);
-
-  return {
-    grid: [
-      { x: innerX,               y: innerY,               w: cellW, h: cellH },
-      { x: innerX + cellW + gap, y: innerY,               w: cellW, h: cellH },
-      { x: innerX,               y: innerY + cellH + gap, w: cellW, h: cellH },
-      { x: innerX + cellW + gap, y: innerY + cellH + gap, w: cellW, h: cellH },
-    ],
-    captionArea: bottomExtra ? { x: outerPad, y: H - outerPad - bottomExtra, w: innerW, h: bottomExtra } : null
-  };
+async function prepareLogosForCapture() {
+  await inlineImageToDataURL($(".fc-logo"));
+  // 상단 로고는 프레임 캡처에 포함되지 않지만, 필요하면 아래도 가능
+  // await inlineImageToDataURL($(".top-logo"));
 }
-function drawCover(ctx, img, x, y, w, h) {
-  const rImg = img.width / img.height;
-  const rBox = w / h;
-  let sx, sy, sw, sh;
-  if (rImg > rBox) { sh = img.height; sw = sh * rBox; sx = (img.width - sw) / 2; sy = 0; }
-  else { sw = img.width; sh = sw / rBox; sx = 0; sy = (img.height - sh) / 2; }
-  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
-}
-async function drawHeader(ctx, W, H, fontColor) {
-  try {
-    const logoEl = document.querySelector(".fc-logo");
-    if (logoEl) {
-      let src = logoEl.src;
-      if (!src.startsWith("data:")) {
-        const r = await fetch(src, { mode: "cors" });
-        const b = await r.blob();
-        src = await new Promise(ok => {
-          const fr = new FileReader();
-          fr.onload = () => ok(fr.result);
-          fr.readAsDataURL(b);
-        });
-      }
-      const logo = await loadImage(src);
-      const logoSize = Math.round(Math.min(W, H) * 0.06);
-      const lx = Math.round(W * 0.5 - logoSize - 8);
-      const ly = Math.round(H * 0.05);
-      ctx.drawImage(logo, lx, ly, logoSize, logoSize);
-    }
-  } catch {}
 
-  // 타이틀(벡터 텍스트)
-  ctx.fillStyle = fontColor || "#111";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.font = `700 ${Math.round(Math.min(W,H)*0.045)}px 'Noto Sans KR', system-ui, sans-serif`;
-  const text = document.querySelector(".fc-title")?.textContent || "2025 보성제";
-  const tx = Math.round(W * 0.5 + 8);
-  const ty = Math.round(H * 0.05 + Math.min(W,H) * 0.03);
-  ctx.fillText(text, tx, ty);
+// ---------- 환경 감지 ----------
+function isMobile(){
+  return /iphone|ipad|ipod|android|mobile/i.test(navigator.userAgent);
+}
+
+// ---------- 합성 ----------
+async function makeFourcut() {
+  if (selected.size !== 4) return alert("4장을 선택하세요");
+
+  // 캔버스 taint 방지
+  await prepareLogosForCapture();
+
+  const node = $("#fourcut");
+  const canvas = await html2canvas(node, {
+    backgroundColor: null,
+    useCORS: true,
+    allowTaint: false,
+    scale: isMobile() ? 1.25 : 2   // 모바일 용량 최적화
+  });
+  const quality = isMobile() ? 0.82 : 0.92;
+  finalDataUrl = canvas.toDataURL("image/jpeg", quality);
+  $("#btnSave").disabled = false;
+}
+
+// ---------- 저장 & 갤러리 ----------
+async function saveImage() {
+  if (!finalDataUrl) return;
+  const id = Date.now();
+  localStorage.setItem(
+    "photo:" + id,
+    JSON.stringify({ id, createdAt: Date.now(), image: finalDataUrl })
+  );
+  await renderGallery();
+  await showQrPopupWithUpload();
+}
+function resetSession() {
+  shots = [];
+  selected.clear();
+  finalDataUrl = null;
+  renderThumbs();
+  renderPreview();
+  updateCounter();
+  $("#btnSave").disabled = true;
+  $("#btnMake").disabled = true;
+  toggleNextButtons();
+}
+async function renderGallery() {
+  const grid = $("#galleryGrid");
+  grid.innerHTML = "";
+  const items = Object.keys(localStorage)
+    .filter(k => k.startsWith("photo:"))
+    .map(k => JSON.parse(localStorage.getItem(k)))
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  if (!items.length) {
+    grid.innerHTML =
+      "<div style='grid-column:1/-1;text-align:center;color:#999'>저장된 사진 없음</div>";
+    return;
+  }
+  for (const it of items) {
+    const wrap = document.createElement("div");
+    wrap.className = "g-item";
+    wrap.innerHTML = `<img src="${it.image}" alt=""><button class="del">×</button>`;
+    wrap.querySelector(".del").onclick = () => {
+      localStorage.removeItem("photo:" + it.id);
+      renderGallery();
+    };
+    grid.appendChild(wrap);
+  }
 }
 
 // ---------- 프레임/글씨 색상 ----------
-function hexToRgb(hex){const m=hex.replace('#','');const b=parseInt(m,16);if(m.length===3){const r=(b>>8)&0xF,g=(b>>4)&0^0,l=b&0xF;return{r:r*17,g:g*17,b:l*17};}return{r:(b>>16)&255,g:(b>>8)&255,b:b&255};}
+function hexToRgb(hex){const m=hex.replace('#','');const b=parseInt(m,16);if(m.length===3){const r=(b>>8)&0xF,g=(b>>4)&0xF,l=b&0xF;return{r:r*17,g:g*17,b:l*17};}return{r:(b>>16)&255,g:(b>>8)&255,b:b&255};}
 function rgbToHex({r,g,b}){const h=n=>n.toString(16).padStart(2,'0');return`#${h(r)}${h(g)}${h(b)}`;}
 function mix(a,b,t){a=hexToRgb(a);b=hexToRgb(b);return rgbToHex({r:Math.round(a.r+(b.r-a.r)*t),g:Math.round(a.g+(b.g-a.g)*t),b:Math.round(a.b+(b.b-a.b)*t)});}
 function updateFrame(){
@@ -270,53 +266,16 @@ function updateFontColor(){
   $(".fc-title").style.color = c;
 }
 
-// ---------- 합성(고정 해상도로 직접 그리기) ----------
-async function makeFourcut() {
-  if (selected.size !== 4) return alert("4장을 선택하세요");
-
-  // 목표 해상도/품질
-  const { W, H } = parseResSel();
-  const quality = Math.max(0.5, Math.min(parseFloat($("#jpgQ")?.value || "0.92"), 0.98));
-
-  // 캔버스
-  const canvas = document.createElement("canvas");
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext("2d");
-
-  // 배경(프레임)
-  const style = $("#frameStyle").value;
-  const frameColor = $("#frameColor").value;
-  drawFrameBackground(ctx, W, H, style, frameColor);
-
-  // 그리드
-  const { grid } = layoutFourcutRect(W, H, style);
-
-  // 선택된 4장 로드 & 배치
-  const order = [...selected];
-  const imgs = await Promise.all(order.map(i => loadImage(shots[i])));
-  imgs.forEach((im, idx) => {
-    const r = grid[idx];
-    const pad = Math.round(Math.min(W,H) * 0.005);
-    ctx.fillStyle = "#eee";
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-    drawCover(ctx, im, r.x + pad, r.y + pad, r.w - pad*2, r.h - pad*2);
-  });
-
-  // 헤더(로고 + 타이틀)
-  await drawHeader(ctx, W, H, $("#fontColor").value);
-
-  // dataURL 생성
-  finalDataUrl = canvas.toDataURL("image/jpeg", quality);
-  $("#btnSave").disabled = false;
-}
-
-// ---------- 저장 & 갤러리 & QR ----------
+// ---------- Cloudinary 업로드 + QR ----------
 const CLOUD_NAME = 'djqkuxfki', UPLOAD_PRESET = 'fourcut_unsigned';
 
 function setQrState({loading=false, error=""} = {}) {
   const l = $("#qrLoading"), e = $("#qrError");
   if (l) l.style.display = loading ? "block" : "none";
-  if (e) { e.style.display = error ? "block" : "none"; e.textContent = error || ""; }
+  if (e) {
+    e.style.display = error ? "block" : "none";
+    e.textContent = error || "";
+  }
 }
 function computeQrPopupSize(){ return Math.max(160, Math.floor(Math.min(window.innerWidth * 0.6, 260))); }
 function openQrPopup(url){
@@ -329,12 +288,19 @@ function closeQrPopup(){ resetSession(); $("#qrPopup").style.display='none'; sho
 
 async function uploadFinalToCloudinary(){
   const blob = await (await fetch(finalDataUrl)).blob();
-  if (blob.size > 10 * 1024 * 1024) throw new Error(`이미지가 너무 큽니다 (${(blob.size/1024/1024).toFixed(1)}MB).`);
+  if (blob.size > 10 * 1024 * 1024) {
+    throw new Error(`이미지가 너무 큽니다 (${(blob.size/1024/1024).toFixed(1)}MB).`);
+  }
   const form = new FormData();
   form.append('file', blob);
   form.append('upload_preset', UPLOAD_PRESET);
+
   const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
-    method:'POST', body: form, mode: 'cors', credentials: 'omit', cache: 'no-store'
+    method:'POST',
+    body: form,
+    mode: 'cors',
+    credentials: 'omit',
+    cache: 'no-store'
   });
   if (!res.ok) {
     const txt = await res.text().catch(()=> "");
@@ -344,15 +310,12 @@ async function uploadFinalToCloudinary(){
   if (!data.secure_url) throw new Error("업로드 응답에 secure_url이 없습니다.");
   return data.secure_url;
 }
-function makeViewerUrl(u){
-  const v = new URL('viewer.html', location.href);
-  v.searchParams.set('img', u);
-  return v.toString();
-}
 async function showQrPopupWithUpload(){
+  // 로딩 표시 + 팝업 먼저 열기(모바일에서 팝업 차단 이슈 회피)
   setQrState({loading:true, error:""});
   $("#qrPopup").style.display='flex';
   $("#qrPopupContainer").innerHTML = "";
+
   try{
     const url = await uploadFinalToCloudinary();
     setQrState({loading:false});
@@ -369,37 +332,10 @@ async function showQrPopupWithUpload(){
     w.appendChild(retry);
   }
 }
-
-async function saveImage() {
-  if (!finalDataUrl) return;
-  const id = Date.now();
-  localStorage.setItem("photo:" + id, JSON.stringify({ id, createdAt: Date.now(), image: finalDataUrl }));
-  await renderGallery();
-  await showQrPopupWithUpload();
-}
-function resetSession() {
-  shots = []; selected.clear(); finalDataUrl = null;
-  renderThumbs(); renderPreview(); updateCounter();
-  $("#btnSave").disabled = true; $("#btnMake").disabled = true; toggleNextButtons();
-}
-async function renderGallery() {
-  const grid = $("#galleryGrid");
-  grid.innerHTML = "";
-  const items = Object.keys(localStorage)
-    .filter(k => k.startsWith("photo:"))
-    .map(k => JSON.parse(localStorage.getItem(k)))
-    .sort((a, b) => b.createdAt - a.createdAt);
-  if (!items.length) {
-    grid.innerHTML = "<div style='grid-column:1/-1;text-align:center;color:#999'>저장된 사진 없음</div>";
-    return;
-  }
-  for (const it of items) {
-    const wrap = document.createElement("div");
-    wrap.className = "g-item";
-    wrap.innerHTML = `<img src="${it.image}" alt=""><button class="del">×</button>`;
-    wrap.querySelector(".del").onclick = () => { localStorage.removeItem("photo:" + it.id); renderGallery(); };
-    grid.appendChild(wrap);
-  }
+function makeViewerUrl(u){
+  const v = new URL('viewer.html', location.href);
+  v.searchParams.set('img', u);
+  return v.toString();
 }
 
 // ---------- 이벤트 ----------
